@@ -1,0 +1,23 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run Handwritten Digit App",
+			"type": "shell",
+			"command": "py",
+			"args": [
+				"-3.13",
+				"-m",
+				"uvicorn",
+				"app:app",
+				"--host",
+				"127.0.0.1",
+				"--port",
+				"7860"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}

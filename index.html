@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Draw a digit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0f1226; --ink2:#181c3a; --line:#2b3060; --chalk:#f2efe9; --dim:#9a9fc4;
+  --ann:#8b9cff; --knn:#ff7a8a;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  min-height:100vh; color:var(--chalk); font-family:'Bricolage Grotesque',system-ui,sans-serif;
+  background:radial-gradient(900px 500px at 15% -10%,#252a63 0,transparent 60%),
+             radial-gradient(700px 500px at 100% 110%,#3a1f4d 0,transparent 55%),var(--ink);
+  padding:clamp(16px,4vw,48px);
+}
+main{max-width:1020px;margin:0 auto}
+h1{font-size:clamp(2.2rem,6vw,4rem);line-height:1;margin:0 0 .5rem;font-weight:800;letter-spacing:-.03em}
+.sub{color:var(--dim);max-width:52ch;margin:0 0 2rem;line-height:1.5}
+.grid{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:clamp(16px,3vw,32px);align-items:start}
+@media(max-width:780px){.grid{grid-template-columns:1fr}}
+.panel{background:color-mix(in srgb,var(--ink2) 80%,transparent);border:1px solid var(--line);border-radius:22px;padding:20px}
+.pad{position:relative;border-radius:14px;overflow:hidden;border:2px dashed var(--line);aspect-ratio:1;background:#000}
+canvas#draw{width:100%;height:100%;display:block;touch-action:none;cursor:crosshair}
+.hint{position:absolute;inset:0;display:grid;place-items:center;color:#4a507f;font-size:1.1rem;pointer-events:none;transition:opacity .2s}
+.pad.has .hint{opacity:0}
+.row{display:flex;gap:10px;margin-top:14px;align-items:center;justify-content:space-between}
+button{font:inherit;font-weight:600;color:var(--chalk);background:transparent;border:1px solid var(--line);border-radius:999px;padding:.55rem 1.2rem;cursor:pointer}
+button:hover{border-color:var(--ann)}
+button:focus-visible{outline:2px solid var(--ann);outline-offset:2px}
+.seen{display:flex;align-items:center;gap:10px;color:var(--dim);font-size:.9rem}
+canvas#seen{width:42px;height:42px;image-rendering:pixelated;border-radius:6px;border:1px solid var(--line);background:#000}
+.result{display:grid;grid-template-columns:auto 1fr;gap:24px;align-items:center}
+@media(max-width:480px){.result{grid-template-columns:1fr}}
+#digit{font-size:clamp(7rem,18vw,11rem);line-height:.85;font-weight:800;letter-spacing:-.05em;min-width:.7em;text-align:center;transition:color .25s}
+#digit.empty{color:#2b3060}
+.badge{display:inline-block;border-radius:999px;padding:.3rem .8rem;font-weight:600;font-size:.9rem;color:#0f1226;background:var(--ann)}
+.badge.knn{background:var(--knn)}
+#why{color:var(--dim);margin:.7rem 0 0;line-height:1.45;font-size:.95rem}
+.bars{margin-top:22px;display:grid;gap:6px}
+.bar{display:grid;grid-template-columns:1.2em 1fr 3.2em;gap:10px;align-items:center;font-size:.9rem;color:var(--dim)}
+.bar i{display:block;height:10px;border-radius:99px;background:#232859;overflow:hidden}
+.bar b{display:block;height:100%;width:0;background:var(--ann);border-radius:99px;transition:width .25s}
+.bar.top{color:var(--chalk)}
+h2{font-size:1.1rem;margin:26px 0 4px}
+.nbrs{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px}
+.nb{text-align:center;font-size:.8rem;color:var(--dim)}
+.nb canvas{width:64px;height:64px;image-rendering:pixelated;border-radius:8px;border:1px solid var(--line);display:block;margin-bottom:4px}
+footer{margin-top:28px;color:var(--dim);font-size:.85rem}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Draw a digit.<br>Two models take a look.</h1>
+  <p class="sub">A neural network answers first. When it isn't sure, a nearest-neighbour search through real handwritten examples takes over.</p>
+
+  <div class="grid">
+    <section class="panel">
+      <div class="pad" id="pad"><canvas id="draw" width="280" height="280" aria-label="Drawing area"></canvas><div class="hint">Draw a number from 0 to 9</div></div>
+      <div class="row">
+        <button id="clear" type="button">Clear</button>
+        <div class="seen"><span>What the model sees</span><canvas id="seen" width="28" height="28"></canvas></div>
+      </div>
+    </section>
+
+    <section class="panel" aria-live="polite">
+      <div class="result">
+        <div id="digit" class="empty">?</div>
+        <div>
+          <span id="badge" class="badge" hidden></span>
+          <p id="why">Your prediction will appear here as you draw.</p>
+        </div>
+      </div>
+      <div class="bars" id="bars"></div>
+      <h2>Closest examples from MNIST</h2>
+      <div class="nbrs" id="nbrs"></div>
+    </section>
+  </div>
+  <footer>Tip: draw big and centered, with one continuous stroke where you can.</footer>
+</main>
+
+<script>
+const cv = document.getElementById('draw'), ctx = cv.getContext('2d');
+const pad = document.getElementById('pad');
+const W = cv.width;
+function reset(){ ctx.fillStyle = '#000'; ctx.fillRect(0,0,W,W); ctx.lineCap = ctx.lineJoin = 'round'; ctx.lineWidth = 22; ctx.strokeStyle = '#fff'; }
+reset();
+
+// bars
+const barsEl = document.getElementById('bars');
+for (let i = 0; i < 10; i++) barsEl.insertAdjacentHTML('beforeend', `<div class="bar" id="bar${i}"><span>${i}</span><i><b></b></i><span>0%</span></div>`);
+
+let drawing = false, last = null, dirty = false, busy = false, timer = null;
+const pos = e => { const r = cv.getBoundingClientRect(); return { x:(e.clientX-r.left)*W/r.width, y:(e.clientY-r.top)*W/r.height }; };
+
+cv.addEventListener('pointerdown', e => {
+  cv.setPointerCapture(e.pointerId); drawing = true; last = pos(e);
+  ctx.beginPath(); ctx.arc(last.x, last.y, 11, 0, 7); ctx.fillStyle = '#fff'; ctx.fill();
+  pad.classList.add('has'); dirty = true;
+});
+cv.addEventListener('pointermove', e => {
+  if (!drawing) return;
+  const p = pos(e); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p;
+  if (!timer) timer = setTimeout(() => { timer = null; predict(); }, 200);
+});
+const stop = () => { if (drawing) { drawing = false; predict(); } };
+cv.addEventListener('pointerup', stop); cv.addEventListener('pointercancel', stop);
+
+document.getElementById('clear').onclick = () => { reset(); pad.classList.remove('has'); dirty = false; showEmpty(); };
+
+// Convert the drawing to an MNIST-style 28x28: fit in 20x20 box, then center by center of mass
+function toMnist() {
+  const d = ctx.getImageData(0, 0, W, W).data;
+  let x0 = W, y0 = W, x1 = -1, y1 = -1;
+  for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) if (d[(y*W+x)*4] > 24) { if (x<x0) x0=x; if (x>x1) x1=x; if (y<y0) y0=y; if (y>y1) y1=y; }
+  if (x1 < 0) return null;
+  const bw = x1-x0+1, bh = y1-y0+1, s = 20/Math.max(bw, bh), nw = bw*s, nh = bh*s;
+  const t = document.createElement('canvas'); t.width = t.height = 28;
+  const c = t.getContext('2d'); c.fillStyle = '#000'; c.fillRect(0,0,28,28); c.imageSmoothingQuality = 'high';
+  c.drawImage(cv, x0, y0, bw, bh, (28-nw)/2, (28-nh)/2, nw, nh);
+  const px = c.getImageData(0,0,28,28).data, g = new Float32Array(784);
+  let m = 0, cx = 0, cy = 0;
+  for (let i = 0; i < 784; i++) { const v = px[i*4]/255; g[i] = v; m += v; cx += v*(i%28); cy += v*Math.floor(i/28); }
+  const sx = Math.round(13.5 - cx/m), sy = Math.round(13.5 - cy/m), out = new Float32Array(784);
+  for (let y = 0; y < 28; y++) for (let x = 0; x < 28; x++) { const nx = x+sx, ny = y+sy; if (nx>=0 && nx<28 && ny>=0 && ny<28) out[ny*28+nx] = g[y*28+x]; }
+  return out;
+}
+
+function paint(canvas, arr, scale255) {
+  const c = canvas.getContext('2d'), img = c.createImageData(28, 28);
+  for (let i = 0; i < 784; i++) { const v = scale255 ? arr[i] : arr[i]*255; img.data.set([v, v, v, 255], i*4); }
+  c.putImageData(img, 0, 0);
+}
+
+async function predict() {
+  if (busy) { timer = timer || setTimeout(() => { timer = null; predict(); }, 150); return; }
+  const px = toMnist(); if (!px) return;
+  paint(document.getElementById('seen'), px, false);
+  busy = true;
+  try {
+    const r = await fetch('/api/predict', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pixels: Array.from(px) }) });
+    if (!r.ok) throw new Error(r.status);
+    show(await r.json());
+  } catch (err) {
+    document.getElementById('why').textContent = 'Could not reach the model. Check that the server is running and try again.';
+  } finally { busy = false; }
+}
+
+function show(r) {
+  const dg = document.getElementById('digit'), b = document.getElementById('badge'), knn = r.decided_by === 'KNN';
+  dg.textContent = r.digit; dg.classList.remove('empty'); dg.style.color = knn ? 'var(--knn)' : 'var(--ann)';
+  b.hidden = false; b.className = 'badge' + (knn ? ' knn' : ''); b.textContent = knn ? 'Nearest neighbours decided' : 'Neural network decided';
+  document.getElementById('why').textContent = knn
+    ? `The neural network was only ${(r.confidence*100).toFixed(0)}% sure (it guessed ${r.ann_pred}), so the closest real examples voted instead.`
+    : `The neural network is ${(r.confidence*100).toFixed(1)}% confident. The nearest neighbours would have said ${r.knn_pred}.`;
+  r.probs.forEach((p, i) => {
+    const row = document.getElementById('bar'+i);
+    row.classList.toggle('top', i === r.ann_pred);
+    row.querySelector('b').style.width = (p*100)+'%';
+    row.querySelector('b').style.background = knn ? 'var(--knn)' : 'var(--ann)';
+    row.lastElementChild.textContent = (p*100).toFixed(p < .01 ? 1 : 0) + '%';
+  });
+  const n = document.getElementById('nbrs'); n.innerHTML = '';
+  r.neighbors.forEach(nb => {
+    const d = document.createElement('div'); d.className = 'nb';
+    const c = document.createElement('canvas'); c.width = c.height = 28; paint(c, nb.pixels, true);
+    d.append(c, `Label ${nb.label}`); n.append(d);
+  });
+}
+
+function showEmpty() {
+  const dg = document.getElementById('digit'); dg.textContent = '?'; dg.classList.add('empty'); dg.style.color = '';
+  document.getElementById('badge').hidden = true;
+  document.getElementById('why').textContent = 'Your prediction will appear here as you draw.';
+  document.getElementById('nbrs').innerHTML = '';
+  document.querySelectorAll('.bar').forEach(r => { r.querySelector('b').style.width = 0; r.lastElementChild.textContent = '0%'; r.classList.remove('top'); });
+  const s = document.getElementById('seen').getContext('2d'); s.fillStyle = '#000'; s.fillRect(0,0,28,28);
+}
+showEmpty();
+</script>
+</body>
+</html>
